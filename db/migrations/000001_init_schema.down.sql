@@ -1,0 +1,16 @@
+-- RelayForge Rollback Initial Schema Migration
+DROP TABLE IF EXISTS delivery_attempts CASCADE;
+DROP TABLE IF EXISTS deliveries CASCADE;
+DROP TABLE IF EXISTS outbox_events CASCADE;
+DROP TABLE IF EXISTS events CASCADE;
+DROP TABLE IF EXISTS endpoint_subscriptions CASCADE;
+DROP TABLE IF EXISTS endpoints CASCADE;
+DROP TABLE IF EXISTS applications CASCADE;
+DROP TABLE IF EXISTS api_keys CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS tenants CASCADE;
+
+DROP TYPE IF EXISTS delivery_status;
+DROP TYPE IF EXISTS outbox_status;
+DROP TYPE IF EXISTS user_role;
+

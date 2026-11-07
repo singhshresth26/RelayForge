@@ -1,0 +1,147 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: relayforge-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: relayforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../db/migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: relayforge-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: relayforge-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management Web UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: deployments/docker/Dockerfile.backend
+    container_name: relayforge-api
+    command: ["api"]
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      ENV: "production"
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/relayforge?sslmode=disable"
+      REDIS_URL: "redis://redis:6379/0"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      RELAYFORGE_MASTER_KEY: "01234567890123456789012345678901"
+      ALLOW_PRIVATE_IPS: "false"
+      ENFORCE_HTTPS: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  outbox-publisher:
+    build:
+      context: ..
+      dockerfile: deployments/docker/Dockerfile.backend
+    container_name: relayforge-outbox
+    command: ["outbox"]
+    environment:
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/relayforge?sslmode=disable"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      OUTBOX_BATCH_SIZE: "100"
+      OUTBOX_POLL_INTERVAL: "50ms"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  fanout-processor:
+    build:
+      context: ..
+      dockerfile: deployments/docker/Dockerfile.backend
+    container_name: relayforge-fanout
+    command: ["fanout"]
+    environment:
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/relayforge?sslmode=disable"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  delivery-worker:
+    build:
+      context: ..
+      dockerfile: deployments/docker/Dockerfile.backend
+    container_name: relayforge-worker
+    command: ["worker"]
+    environment:
+      DATABASE_URL: "postgres://postgres:postgrespassword@postgres:5432/relayforge?sslmode=disable"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      RELAYFORGE_MASTER_KEY: "01234567890123456789012345678901"
+      WORKER_CONCURRENCY: "20"
+      ALLOW_PRIVATE_IPS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.49.1
+    container_name: relayforge-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:10.3.1
+    container_name: relayforge-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+
+volumes:
+  pgdata:
+

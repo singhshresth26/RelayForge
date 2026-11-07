@@ -1,0 +1,32 @@
+# Multi-stage Docker build for RelayForge Backend
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o /relayforge ./cmd/relayforge
+
+# Production Minimal Runtime Image
+FROM alpine:3.19
+
+RUN apk --no-cache add ca-certificates tzdata curl
+
+# Run as non-root user for security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
+WORKDIR /home/appuser
+
+COPY --from=builder /relayforge /usr/local/bin/relayforge
+
+EXPOSE 8080
+
+ENTRYPOINT ["relayforge"]
+CMD ["api"]
+
